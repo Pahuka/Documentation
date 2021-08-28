@@ -57,33 +57,65 @@ namespace Documentation
 
         public ApiParamDescription GetApiMethodParamFullDescription(string methodName, string paramName)
         {
-            var description = new ApiParamDescription();
+            if (type.GetMethod(methodName) == null)
+                return new ApiParamDescription() { ParamDescription = new CommonDescription(paramName) };
+            var paramDesc = type.GetMethod(methodName).GetParameters().Where(x => x.Name == paramName);
+            var description = new ApiParamDescription() {ParamDescription = new CommonDescription(paramName)};
+
+            foreach (var item in paramDesc.SelectMany(x => x.CustomAttributes))
+            {
+                if (item.AttributeType == typeof(ApiRequiredAttribute))
+                    description.Required = (bool)item.ConstructorArguments.FirstOrDefault().Value;
+                if (item.AttributeType == typeof(ApiDescriptionAttribute))
+                    description.ParamDescription.Description = (string)item.ConstructorArguments.FirstOrDefault().Value;
+                if (item.AttributeType == typeof(ApiIntValidationAttribute))
+                {
+                    description.MinValue = item.ConstructorArguments[0].Value;
+                    description.MaxValue = item.ConstructorArguments[1].Value;
+                }
+            }
 
             return description;
         }
 
         public ApiMethodDescription GetApiMethodFullDescription(string methodName)
         {
-            if (type.GetMethod(methodName).GetCustomAttributes<ApiMethodAttribute>(true).FirstOrDefault() == null) return null;
+            if (type.GetMethod(methodName).GetCustomAttributes<ApiMethodAttribute>(true).FirstOrDefault() == null)
+                return null;
 
             var returnDesc = type.GetMethod(methodName).ReturnParameter.CustomAttributes;
-            var paramDesc = type.GetMethod(methodName).GetParameters().Select(x => Tuple.Create(x.Name, x.CustomAttributes)).ToList();
-            var paramList = new List<ApiParamDescription>();
+            var paramDesc = type.GetMethod(methodName).GetParameters()
+                .Select(x => Tuple.Create(x.Name, x.CustomAttributes.ToList())).ToList();
+
             var description = new ApiMethodDescription
             {
                 MethodDescription = new CommonDescription(methodName, GetApiMethodDescription(methodName))
             };
 
-            foreach (var item in paramDesc)
+            BuildApiDescParams(description, methodName);
+
+            if (returnDesc.Count() != 0) BuildApiReturnParams(description, returnDesc);
+
+            return description;
+        }
+
+        private void BuildApiDescParams(ApiMethodDescription description, string methodName)
+        {
+            var paramList = new List<ApiParamDescription>();
+
+            foreach (var item in type.GetMethod(methodName).GetParameters()
+                .Select(x => Tuple.Create(x.Name, x.CustomAttributes.ToList())).ToList())
             {
                 paramList.Add(new ApiParamDescription() { ParamDescription = new CommonDescription(item.Item1) });
+
                 foreach (var customParams in item.Item2)
                 {
                     if (customParams.AttributeType == typeof(ApiRequiredAttribute)
-                        && (bool)customParams.ConstructorArguments.FirstOrDefault().Value == true)
+                        && (bool)customParams.ConstructorArguments.FirstOrDefault().Value)
                         paramList.Last().Required = (bool)customParams.ConstructorArguments.FirstOrDefault().Value;
                     if (customParams.AttributeType == typeof(ApiDescriptionAttribute))
-                        paramList.Last().ParamDescription.Description = (string)customParams.ConstructorArguments.FirstOrDefault().Value;
+                        paramList.Last().ParamDescription.Description =
+                            (string)customParams.ConstructorArguments.FirstOrDefault().Value;
                     if (customParams.AttributeType == typeof(ApiIntValidationAttribute))
                     {
                         paramList.Last().MinValue = customParams.ConstructorArguments[0].Value;
@@ -92,26 +124,25 @@ namespace Documentation
                 }
             }
             description.ParamDescriptions = paramList.ToArray();
+        }
 
-            if (returnDesc.Count() != 0)
+        private void BuildApiReturnParams(ApiMethodDescription description, IEnumerable<CustomAttributeData> returnDesc)
+        {
+            description.ReturnDescription = new ApiParamDescription() { ParamDescription = new CommonDescription() };
+
+            foreach (var item in returnDesc)
             {
-                description.ReturnDescription = new ApiParamDescription() { ParamDescription = new CommonDescription() };
-
-                foreach (var item in returnDesc)
+                if (item.AttributeType == typeof(ApiRequiredAttribute))
+                    description.ReturnDescription.Required = (bool)item.ConstructorArguments.FirstOrDefault().Value;
+                if (item.AttributeType == typeof(ApiDescriptionAttribute))
+                    description.ReturnDescription.ParamDescription.Description = 
+                        (string)item.ConstructorArguments.FirstOrDefault().Value;
+                if (item.AttributeType == typeof(ApiIntValidationAttribute))
                 {
-                    if (item.AttributeType == typeof(ApiRequiredAttribute))
-                        description.ReturnDescription.Required = (bool)item.ConstructorArguments.FirstOrDefault().Value;
-                    if (item.AttributeType == typeof(ApiDescriptionAttribute))
-                        description.ReturnDescription.ParamDescription.Description = (string)item.ConstructorArguments.FirstOrDefault().Value;
-                    if (item.AttributeType == typeof(ApiIntValidationAttribute))
-                    {
-                        description.ReturnDescription.MinValue = item.ConstructorArguments[0].Value;
-                        description.ReturnDescription.MaxValue = item.ConstructorArguments[1].Value;
-                    }
+                    description.ReturnDescription.MinValue = item.ConstructorArguments[0].Value;
+                    description.ReturnDescription.MaxValue = item.ConstructorArguments[1].Value;
                 }
             }
-
-            return description;
         }
     }
 }
